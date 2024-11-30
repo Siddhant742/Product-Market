@@ -37,6 +37,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   TextEditingController messageController = TextEditingController();
   bool _isFavorite = false;
   final ScrollController _scrollController = ScrollController();
+  int _quantity = 1;
+  int _maxQuantity = 1000;
+
+  // New variables to track selected variant details
+  int currentPrice = 0;
+  int currentStrikePrice = 0;
+  int currentOffPercent = 0;
+  String currentProductCode = '';
+  List<String> currentImages = [];
 
   @override
   void initState() {
@@ -56,15 +65,124 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
 
   Future<void> _loadProductDetails() async {
     try {
+      debugPrint('Loading product details for ID: ${widget.productId}');
       final productDetail = await _repository.getProductDetail(widget.productId);
+
       setState(() {
         _productDetail = productDetail;
         _isLoading = false;
+
+        // Debug print of product details
+        debugPrint('Product loaded: ${productDetail.title}');
+        debugPrint('Total color variants: ${productDetail.colorAttributes.length}');
+
+        // Initialize with the first color variant
+        if (productDetail.colorAttributes.isNotEmpty) {
+          _updateSelectedVariant(productDetail.colorAttributes.first);
+        }
       });
     } catch (e) {
+      debugPrint('Error loading product details: $e');
       setState(() => _isLoading = false);
       _showErrorSnackBar();
     }
+  }
+
+  void _updateSelectedVariant(dynamic variantData) {
+    try {
+      setState(() {
+        // Safely access color name with null checks
+        selectedVariant = variantData['color']?['name'] ?? '';
+
+        // Safely access price and other details with null checks and default values
+        currentPrice = variantData['price'] ?? 0;
+        currentStrikePrice = variantData['strikePrice'] ?? 0;
+        currentOffPercent = variantData['offPercent'] ?? 0;
+        currentProductCode = variantData['productCode'] ?? '';
+
+        // Determine max quantity for this variant
+        _maxQuantity = variantData['maxOrder'] ?? 10;
+
+        // Reset quantity to 1 when variant changes
+        _quantity = 1;
+
+        // Fallback to product images if variant images are empty
+        currentImages = variantData['images'] != null && variantData['images'].isNotEmpty
+            ? List<String>.from(variantData['images'])
+            : _productDetail?.images ?? [];
+
+        // Debug print of variant selection
+        debugPrint('Selected Variant: $selectedVariant');
+        debugPrint('Current Price: $currentPrice');
+        debugPrint('Max Quantity: $_maxQuantity');
+      });
+    } catch (e) {
+      debugPrint('Error updating variant: $e');
+    }
+  }
+
+  void _incrementQuantity() {
+    setState(() {
+      if (_quantity < _maxQuantity) {
+        _quantity++;
+        debugPrint('Quantity increased to $_quantity');
+      } else {
+        // Show a snackbar if max quantity is reached
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Maximum quantity of $_maxQuantity reached'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    });
+  }
+
+  void _decrementQuantity() {
+    setState(() {
+      if (_quantity > 1) {
+        _quantity--;
+        debugPrint('Quantity decreased to $_quantity');
+      }
+    });
+  }
+
+  void _handleAddToCart() {
+    // Calculate total price for the selected quantity
+    int totalPrice = currentPrice * _quantity;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.shopping_cart, color: Colors.white),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Added $_quantity ${selectedVariant} - Total: NPR $totalPrice',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'View Cart',
+          onPressed: () {
+            // Navigate to cart
+            debugPrint('Navigating to cart');
+          },
+          textColor: Colors.white,
+        ),
+      ),
+    );
+
+    // Additional debug information
+    debugPrint('Added to Cart:');
+    debugPrint('Variant: $selectedVariant');
+    debugPrint('Quantity: $_quantity');
+    debugPrint('Unit Price: $currentPrice');
+    debugPrint('Total Price: $totalPrice');
   }
 
   void _showMessageBottomSheet() {
@@ -120,29 +238,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       'Message Sent',
       'Thank you for contacting us',
       platformChannelSpecifics,
-    );
-  }
-
-  void _handleAddToCart() {
-    // Add to cart logic here
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.shopping_cart, color: Colors.white),
-            SizedBox(width: 8),
-            Text('Added to cart'),
-          ],
-        ),
-        behavior: SnackBarBehavior.floating,
-        action: SnackBarAction(
-          label: 'View Cart',
-          onPressed: () {
-            // Navigate to cart
-          },
-          textColor: Colors.white,
-        ),
-      ),
     );
   }
 
@@ -205,7 +300,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
           fit: StackFit.expand,
           children: [
             ProductImagesCarousel(
-              images: _productDetail?.images ?? [],
+              images: currentImages,
               currentIndex: currentImageIndex,
               onPageChanged: (index) {
                 setState(() => currentImageIndex = index);
@@ -218,7 +313,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
               child: Container(
                 height: 70,
                 child: ProductThumbnails(
-                  images: _productDetail?.images ?? [],
+                  images: currentImages,
                   selectedIndex: currentImageIndex,
                   onThumbnailSelected: (index) {
                     setState(() => currentImageIndex = index);
@@ -259,8 +354,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Product title remains the same
           Text(
-            _productDetail?.name ?? '',
+            _productDetail?.title ?? '',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
               fontWeight: FontWeight.bold,
             ),
@@ -270,22 +366,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
+              // Dynamic current price
               Text(
-                'NPR ${_productDetail?.price}',
+                'NPR $currentPrice',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: Theme.of(context).primaryColor,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               SizedBox(width: 12),
+              // Dynamic strike price
               Text(
-                'NPR ${_productDetail?.originalPrice}',
+                'NPR $currentStrikePrice',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   decoration: TextDecoration.lineThrough,
                   color: Colors.grey,
                 ),
               ),
               Spacer(),
+              // Dynamic off percentage
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -293,7 +392,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  '${((_productDetail?.originalPrice ?? 0) - (_productDetail?.price ?? 0)) / (_productDetail?.originalPrice ?? 1) * 100}% OFF',
+                  '$currentOffPercent% OFF',
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -302,9 +401,64 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
               ),
             ],
           ),
+          SizedBox(height: 8),
+          // Dynamic product code with selected variant color name
+          Text(
+            'Product Code: $currentProductCode (${selectedVariant})',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          // Optional: Add color swatch if available
+          if (_productDetail?.colorAttributes != null)
+            Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  Text(
+                    'Color: ',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      color: _getColorFromVariant(),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey.shade300, width: 1),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    selectedVariant,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
+  }
+
+// Helper method to convert color name to Color object
+  Color _getColorFromVariant() {
+    // Find the current variant's color value
+    final variant = _productDetail?.colorVariants.firstWhere(
+          (v) => v['color']?['name'] == selectedVariant,
+      orElse: () => null,
+    );
+
+    if (variant != null && variant['color']?['colorValue'] != null) {
+      try {
+        // Convert color value (assuming it's in the format [#a43127])
+        String colorHex = variant['color']['colorValue'][0].toString().replaceAll('[', '').replaceAll(']', '');
+        return Color(int.parse(colorHex.replaceFirst('#', ''), radix: 16) + 0xFF000000);
+      } catch (e) {
+        debugPrint('Error parsing color: $e');
+      }
+    }
+
+    // Fallback to a default color
+    return Colors.grey.shade500;
   }
 
   Widget _buildColorVariants() {
@@ -324,13 +478,32 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
             colorAttributes: _productDetail?.colorAttributes ?? [],
             selectedVariant: selectedVariant,
             onVariantSelected: (variant) {
-              setState(() => selectedVariant = variant);
+              // Log variant name
+              debugPrint('Variant selected: $variant');
+
+              // Find the full variant data
+              final fullVariant = _productDetail?.colorVariants.firstWhere(
+                    (v) => v['color']?['_id'] == variant,
+                orElse: () {
+                  debugPrint('No matching variant found for: $variant');
+                  return null;
+                },
+              );
+
+              if (fullVariant != null) {
+                // Log full variant details
+                debugPrint('Full Variant Data: $fullVariant');
+                _updateSelectedVariant(fullVariant);
+              }
             },
           ),
+          SizedBox(height: 12,),
+          _buildQuantitySelector(),
         ],
       ),
     );
   }
+
 
   Widget _buildProductTabs() {
     return Padding(
@@ -350,14 +523,37 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SizedBox(height: 8),
+          ReviewSection(rating: _productDetail?.rating ?? 0),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuantitySelector() {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
           Text(
-            'Reviews',
+            'Quantity',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          Spacer(),
+          IconButton(
+            icon: Icon(Icons.remove_circle_outline),
+            onPressed: _decrementQuantity,
+          ),
+          Text(
+            '$_quantity',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
             ),
           ),
-          SizedBox(height: 8),
-          ReviewSection(rating: _productDetail?.rating ?? 0),
+          IconButton(
+            icon: Icon(Icons.add_circle_outline),
+            onPressed: _incrementQuantity,
+          ),
         ],
       ),
     );
@@ -366,47 +562,52 @@ class _ProductDetailScreenState extends State<ProductDetailScreen>
   Widget _buildActionButtons() {
     return Padding(
       padding: EdgeInsets.all(16),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            flex: 2,
-            child: ElevatedButton(
-              onPressed: _handleAddToCart,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.shopping_cart),
-                  SizedBox(width: 8),
-                  Text('Add to Cart'),
-                ],
-              ),
-              style: ElevatedButton.styleFrom(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+          SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: _handleAddToCart,
+                  style: ElevatedButton.styleFrom(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.shopping_cart),
+                      SizedBox(width: 8),
+                      Text('Add to Cart'),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
-          SizedBox(width: 16),
-          Expanded(
-            child: OutlinedButton(
-              onPressed: _showMessageBottomSheet,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.message),
-                  SizedBox(width: 8),
-                  Text('Message'),
-                ],
-              ),
-              style: OutlinedButton.styleFrom(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+              SizedBox(width: 16),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _showMessageBottomSheet,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.message),
+                      SizedBox(width: 8),
+                      Text('Message'),
+                    ],
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),
